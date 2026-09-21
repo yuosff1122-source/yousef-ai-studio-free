@@ -1,0 +1,58 @@
+name: OpenMontage Free Demo Render
+on:
+  workflow_dispatch:
+    inputs:
+      demo:
+        description: Public zero-key demonstration
+        required: true
+        type: choice
+        options:
+          - world-in-numbers
+          - code-to-screen
+          - focusflow-pitch
+permissions:
+  contents: read
+concurrency:
+  group: openmontage-demo-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  render:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      OPENMONTAGE_SHA: 08e2151fa02de28a5d6a312b3d575692bf147ad7
+      DEMO_NAME: ${{ inputs.demo }}
+      CI: 'true'
+    steps:
+      - name: Fetch fixed OpenMontage version
+        uses: actions/checkout@v4
+        with:
+          repository: calesthio/OpenMontage
+          ref: 08e2151fa02de28a5d6a312b3d575692bf147ad7
+          persist-credentials: false
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install composer
+        working-directory: remotion-composer
+        run: npm ci --no-audit --no-fund
+      - name: Render video
+        shell: bash
+        run: |
+          set -euo pipefail
+          command -v ffprobe || { sudo apt-get update && sudo apt-get install -y ffmpeg; }
+          python render_demo.py "$DEMO_NAME"
+          file="projects/demos/renders/$DEMO_NAME.mp4"
+          test -s "$file"
+          codec=$(ffprobe -v error -select_streams v:0 -show_entries stream=codec_name -of default=nw=1:nk=1 "$file")
+          test "$codec" = h264
+          ffprobe -v error "$file"
+      - name: Upload verified MP4
+        uses: actions/upload-artifact@v4
+        with:
+          name: openmontage-${{ inputs.demo }}
+          path: projects/demos/renders/${{ inputs.demo }}.mp4
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
